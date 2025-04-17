@@ -9,7 +9,7 @@ import exifread
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, 
                              QFrame, QMessageBox, QPushButton, QHBoxLayout, QGridLayout,
                              QDialog, QLineEdit, QDialogButtonBox, QTableWidget, 
-                             QTableWidgetItem, QHeaderView)
+                             QTableWidgetItem, QHeaderView, QInputDialog)
 from PyQt5.QtGui import QPixmap, QImage, QTransform
 from PyQt5.QtCore import Qt
 from PIL import Image, ExifTags
@@ -30,7 +30,8 @@ DEFAULT_KEYBINDS = {
     "previous": "P",
     "quit": "Q",
     "rotate_clockwise": "R",
-    "rotate_counterclockwise": "E"
+    "rotate_counterclockwise": "E",
+    "custom_name": "Return"  # New keybind for custom naming
 }
 
 # Default categories (with "deleted" being handled specially)
@@ -144,6 +145,12 @@ class PhotoCategorizer(QMainWindow):
         # Initialize keybinds and categories from defaults
         self.keybinds = DEFAULT_KEYBINDS.copy()
         self.categories = DEFAULT_CATEGORIES.copy()
+        
+        # Dictionary to store custom names for specific files
+        self.custom_names = {}
+        
+        # Dictionary to track how many times each custom name has been used
+        self.name_counts = {}
         
         # Load config if it exists
         self.load_config()
@@ -262,6 +269,12 @@ class PhotoCategorizer(QMainWindow):
         edit_keybinds_btn = QPushButton("Edit Keybinds")
         edit_keybinds_btn.clicked.connect(self.edit_keybinds)
         config_layout.addWidget(edit_keybinds_btn)
+        
+        # Add custom name button
+        custom_name_btn = QPushButton("Custom Name")
+        custom_name_btn.clicked.connect(self.prompt_custom_name)
+        config_layout.addWidget(custom_name_btn)
+        
         main_layout.addLayout(config_layout)
         
         # Controls label
@@ -285,12 +298,30 @@ class PhotoCategorizer(QMainWindow):
         self.status_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(self.status_label)
         
+        # Custom name status
+        self.custom_name_label = QLabel()
+        self.custom_name_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.custom_name_label)
+        self.update_custom_name_label()
+        
         self.setCentralWidget(main_widget)
         self.setFocusPolicy(Qt.StrongFocus)
         
         # Display first image
         self.display_current_image()
         self.show()
+    
+    def update_custom_name_label(self):
+        """Update the custom name label to show the current custom name status."""
+        if not self.image_files or self.current_index >= len(self.image_files):
+            self.custom_name_label.setText("")
+            return
+            
+        current_file = str(self.image_files[self.current_index])
+        if current_file in self.custom_names:
+            self.custom_name_label.setText(f"Custom name: {self.custom_names[current_file]}")
+        else:
+            self.custom_name_label.setText("No custom name set (using hash)")
     
     def update_controls_label(self):
         """Update the controls label with current keybinds and categories."""
@@ -301,7 +332,8 @@ class PhotoCategorizer(QMainWindow):
             f"{self.keybinds['quit']} = quit",
             "Delete/Backspace = move to deleted folder",
             f"{self.keybinds['rotate_clockwise']} = rotate image clockwise",
-            f"{self.keybinds['rotate_counterclockwise']} = rotate image anticlockwise\n",
+            f"{self.keybinds['rotate_counterclockwise']} = rotate image anticlockwise",
+            f"{self.keybinds['custom_name']} = set custom name (replaces hash)\n",
             "Categories:"
         ]
         
@@ -313,6 +345,28 @@ class PhotoCategorizer(QMainWindow):
                 instructions.append(f"{key} = move to {display_category} folder")
         
         self.controls_label.setText("\n".join(instructions))
+    
+    def prompt_custom_name(self):
+        """Prompt the user for a custom name to replace the hash for the current file."""
+        if not self.image_files or self.current_index >= len(self.image_files):
+            return
+            
+        current_file = str(self.image_files[self.current_index])
+        current_custom_name = self.custom_names.get(current_file, "")
+        
+        text, ok = QInputDialog.getText(
+            self, 'Custom Name', 
+            'Enter a custom name to replace the hash:',
+            text=current_custom_name
+        )
+        
+        if ok:
+            if text.strip():
+                self.custom_names[current_file] = text.strip()
+            elif current_file in self.custom_names:
+                del self.custom_names[current_file]
+                
+            self.update_custom_name_label()
     
     def edit_categories(self):
         """Open dialog to edit categories."""
@@ -354,6 +408,10 @@ class PhotoCategorizer(QMainWindow):
         # Handle counterclockwise rotation
         elif key.lower() == self.keybinds['rotate_counterclockwise'].lower():
             self.rotate_image(-90)
+        # Handle custom name prompt (Enter key by default)
+        elif (event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter) or \
+             (key.lower() == self.keybinds['custom_name'].lower()):
+            self.prompt_custom_name()
         # Handle category keybinds
         else:
             for category, bind in self.categories.items():
@@ -376,6 +434,9 @@ class PhotoCategorizer(QMainWindow):
         if 0 <= self.current_index < len(self.image_files):
             img_path = self.image_files[self.current_index]
             self.status_label.setText(f"Image {self.current_index + 1} of {len(self.image_files)}: {img_path.name}")
+            
+            # Update custom name label whenever we display a new image
+            self.update_custom_name_label()
             
             try:
                 # Check if it's a RAW file
@@ -420,6 +481,7 @@ class PhotoCategorizer(QMainWindow):
             return
             
         src_path = self.image_files[self.current_index]
+        current_file = str(src_path)
         
         try:
             # Check if it's a RAW file
@@ -476,12 +538,31 @@ class PhotoCategorizer(QMainWindow):
                 width, height = img.size
                 orientation_char = 'h' if width >= height else 'v'
                 
-                # Generate a simple hash from the image content
-                img_hash = hashlib.md5(img.tobytes()).hexdigest()[:8]
-                
                 # Format the new filename
                 date_part = date_taken.strftime("%y%m%d")
-                new_filename = f"{date_part}-{img_hash}-{orientation_char}.jpg"
+                
+                # Use custom name if available, otherwise generate hash
+                if current_file in self.custom_names:
+                    custom_name = self.custom_names[current_file]
+                    
+                    # Track usage count for this name
+                    if custom_name in self.name_counts:
+                        self.name_counts[custom_name] += 1
+                    else:
+                        self.name_counts[custom_name] = 1
+                    
+                    # Format name according to count
+                    count = self.name_counts[custom_name]
+                    if count == 1:
+                        name_part = custom_name
+                    else:
+                        name_part = f"{custom_name}-{count}"
+                else:
+                    # Generate a simple hash from the image content
+                    img_hash = hashlib.md5(img.tobytes()).hexdigest()[:8]
+                    name_part = img_hash
+                
+                new_filename = f"{date_part}-{name_part}-{orientation_char}.jpg"
                 
                 # Set destination path with new filename
                 # Ensure the category directory exists (for nested categories)
@@ -545,6 +626,10 @@ class PhotoCategorizer(QMainWindow):
                                 shutil.copy(sidecar, sidecar_dst)
                             # Remove the original sidecar
                             os.remove(sidecar)
+                
+                # Remove the file from custom_names if it was there
+                if current_file in self.custom_names:
+                    del self.custom_names[current_file]
                 
             except Exception as e:
                 # If conversion fails, just move the original file

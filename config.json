@@ -4,7 +4,8 @@
         "previous": "P",
         "quit": "Q",
         "rotate_clockwise": "R",
-        "rotate_counterclockwise": "E"
+        "rotate_counterclockwise": "E",
+        "custom_name": "Return"
     },
     "categories": {
         "flower": "f",
