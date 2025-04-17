@@ -1,0 +1,3 @@
+([('PhotoCategorizer',
+   '/Users/jandaya/Documents/50501-Photo-Tools/PhotoCategorizer/dist/PhotoCategorizer',
+   'EXECUTABLE')],)

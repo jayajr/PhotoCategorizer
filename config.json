@@ -1,0 +1,13 @@
+{
+    "keybinds": {
+        "next": "N",
+        "previous": "P",
+        "quit": "Q",
+        "rotate_clockwise": "R",
+        "rotate_counterclockwise": "E"
+    },
+    "categories": {
+        "flower": "f",
+        "flower/nested": "d"
+    }
+}
