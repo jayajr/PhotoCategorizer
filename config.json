@@ -8,7 +8,10 @@
         "custom_name": "Return"
     },
     "categories": {
-        "flower": "f",
-        "flower/nested": "d"
+        "march": "j",
+        "bandstand": "h",
+        "signs": "s",
+        "50501": "k",
+        "speakers": "l"
     }
 }

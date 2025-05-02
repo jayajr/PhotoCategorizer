@@ -16,6 +16,7 @@ from PIL import Image, ExifTags
 import io
 import datetime
 import hashlib
+import re
 
 # Try to import piexif for better EXIF handling
 try:
@@ -152,11 +153,17 @@ class PhotoCategorizer(QMainWindow):
         # Dictionary to track how many times each custom name has been used
         self.name_counts = {}
         
+        # Counter for sequential naming - will be initialized after directories are created
+        self.sequence_counter = 1
+        
         # Load config if it exists
         self.load_config()
         
         # Create output directories
         self.setup_directories()
+        
+        # Initialize sequence counter based on existing files
+        self.initialize_sequence_counter()
         
         # Get list of image files
         self.image_files = self.get_image_files()
@@ -221,6 +228,33 @@ class PhotoCategorizer(QMainWindow):
             # Handle nested directories by creating parent directories as needed
             category_path = self.out_dir / category
             category_path.mkdir(exist_ok=True, parents=True)
+    
+    def initialize_sequence_counter(self):
+        """Initialize the sequence counter based on existing files in the output directory."""
+        max_sequence = 0
+        
+        # Pattern to match sequence numbers in filenames (8 digits)
+        sequence_pattern = re.compile(r'-(\d{8})-')
+        
+        # Walk through all directories in out folder
+        for root, dirs, files in os.walk(self.out_dir):
+            for file in files:
+                # Skip files in the originals directory
+                if Path(root) == self.originals_dir:
+                    continue
+                
+                # Look for sequence numbers in filenames
+                match = sequence_pattern.search(file)
+                if match:
+                    try:
+                        seq_num = int(match.group(1))
+                        max_sequence = max(max_sequence, seq_num)
+                    except ValueError:
+                        pass
+        
+        # Set the counter to one more than the highest found
+        self.sequence_counter = max_sequence + 1
+        print(f"Initialized sequence counter to {self.sequence_counter}")
     
     def get_image_files(self):
         """Get list of image files from the input directory."""
@@ -321,7 +355,7 @@ class PhotoCategorizer(QMainWindow):
         if current_file in self.custom_names:
             self.custom_name_label.setText(f"Custom name: {self.custom_names[current_file]}")
         else:
-            self.custom_name_label.setText("No custom name set (using hash)")
+            self.custom_name_label.setText(f"No custom name set (using sequence: {self.sequence_counter:08d})")
     
     def update_controls_label(self):
         """Update the controls label with current keybinds and categories."""
@@ -541,7 +575,7 @@ class PhotoCategorizer(QMainWindow):
                 # Format the new filename
                 date_part = date_taken.strftime("%y%m%d")
                 
-                # Use custom name if available, otherwise generate hash
+                # Use custom name if available, otherwise use sequence number
                 if current_file in self.custom_names:
                     custom_name = self.custom_names[current_file]
                     
@@ -558,9 +592,9 @@ class PhotoCategorizer(QMainWindow):
                     else:
                         name_part = f"{custom_name}-{count}"
                 else:
-                    # Generate a simple hash from the image content
-                    img_hash = hashlib.md5(img.tobytes()).hexdigest()[:8]
-                    name_part = img_hash
+                    # Use sequence number instead of hash
+                    name_part = f"{self.sequence_counter:08d}"
+                    self.sequence_counter += 1
                 
                 new_filename = f"{date_part}-{name_part}-{orientation_char}.jpg"
                 
