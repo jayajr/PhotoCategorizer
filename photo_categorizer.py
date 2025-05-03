@@ -285,6 +285,9 @@ class PhotoCategorizer(QMainWindow):
             except Exception as e:
                 print(f"Error validating image file {f}: {e}")
         
+        # Sort image files in ascending order by name
+        image_files.sort()
+        
         return image_files
     
     def setup_ui(self):
