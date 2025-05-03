@@ -23,7 +23,7 @@ source venv/bin/activate
 
 # Install dependencies
 echo "Installing requirements (including PyQt5)..."
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Ensure the input and output directories exist
 mkdir -p in
