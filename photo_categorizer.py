@@ -9,9 +9,10 @@ import exifread
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget, 
                              QFrame, QMessageBox, QPushButton, QHBoxLayout, QGridLayout,
                              QDialog, QLineEdit, QDialogButtonBox, QTableWidget, 
-                             QTableWidgetItem, QHeaderView, QInputDialog)
+                             QTableWidgetItem, QHeaderView, QInputDialog, QScrollArea,
+                             QSizePolicy)
 from PyQt5.QtGui import QPixmap, QImage, QTransform
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSize
 from PIL import Image, ExifTags
 import io
 import datetime
@@ -155,6 +156,12 @@ class PhotoCategorizer(QMainWindow):
         
         # Counter for sequential naming - will be initialized after directories are created
         self.sequence_counter = 1
+        
+        # Help visibility state
+        self.help_visible = True
+        
+        # Cache for current image pixmap
+        self.current_pixmap = None
         
         # Load config if it exists
         self.load_config()
@@ -312,13 +319,23 @@ class PhotoCategorizer(QMainWindow):
         custom_name_btn.clicked.connect(self.prompt_custom_name)
         config_layout.addWidget(custom_name_btn)
         
+        # Add toggle help button
+        self.toggle_help_btn = QPushButton("Hide Help")
+        self.toggle_help_btn.clicked.connect(self.toggle_help)
+        config_layout.addWidget(self.toggle_help_btn)
+        
         main_layout.addLayout(config_layout)
         
-        # Controls label
+        # Controls label with automatically adjusted height
         self.controls_label = QLabel()
         self.update_controls_label()
         self.controls_label.setAlignment(Qt.AlignLeft)
+        self.controls_label.setTextFormat(Qt.RichText)
+        self.controls_label.setMargin(5)  # Add some padding
+        self.controls_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         main_layout.addWidget(self.controls_label)
+        # Store reference to controls label for toggling visibility
+        self.controls_scroll_area = self.controls_label  # Keep variable name for compatibility
         
         # Image display
         self.image_frame = QFrame()
@@ -327,19 +344,31 @@ class PhotoCategorizer(QMainWindow):
         image_layout = QVBoxLayout(self.image_frame)
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.image_label.setScaledContents(False)  # We'll handle scaling manually
         image_layout.addWidget(self.image_label)
-        main_layout.addWidget(self.image_frame)
+        main_layout.addWidget(self.image_frame, 1)  # Give the image frame a stretch factor of 1
+        
+        # Status footer (minimize size)
+        footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(5)
         
         # Status label
         self.status_label = QLabel()
-        self.status_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.status_label)
+        self.status_label.setAlignment(Qt.AlignLeft)
+        # Set maximum height for the footer
+        self.status_label.setMaximumHeight(20)
+        footer_layout.addWidget(self.status_label)
         
         # Custom name status
         self.custom_name_label = QLabel()
-        self.custom_name_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.custom_name_label)
+        self.custom_name_label.setAlignment(Qt.AlignRight)
+        self.custom_name_label.setMaximumHeight(20)
+        footer_layout.addWidget(self.custom_name_label)
         self.update_custom_name_label()
+        
+        main_layout.addLayout(footer_layout)
         
         self.setCentralWidget(main_widget)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -361,8 +390,9 @@ class PhotoCategorizer(QMainWindow):
             self.custom_name_label.setText(f"No custom name set (using sequence: {self.sequence_counter:08d})")
     
     def update_controls_label(self):
-        """Update the controls label with current keybinds and categories."""
-        instructions = [
+        """Update the controls label with current keybinds and categories in a two-column layout."""
+        # Controls for left column
+        controls = [
             "Controls:",
             f"{self.keybinds['next']} = next image",
             f"{self.keybinds['previous']} = previous image",
@@ -370,18 +400,27 @@ class PhotoCategorizer(QMainWindow):
             "Delete/Backspace = move to deleted folder",
             f"{self.keybinds['rotate_clockwise']} = rotate image clockwise",
             f"{self.keybinds['rotate_counterclockwise']} = rotate image anticlockwise",
-            f"{self.keybinds['custom_name']} = set custom name (replaces hash)\n",
-            "Categories:"
+            f"{self.keybinds['custom_name']} = set custom name (replaces hash)"
         ]
+        
+        # Categories for right column
+        category_instructions = ["Categories:"]
         
         # Add categories except "deleted"
         for category, key in self.categories.items():
             if category != "deleted":
                 # Make nested categories more readable (e.g., "animals/birds" -> "animals > birds")
                 display_category = category.replace('/', ' > ')
-                instructions.append(f"{key} = move to {display_category} folder")
+                category_instructions.append(f"{key} = move to {display_category} folder")
         
-        self.controls_label.setText("\n".join(instructions))
+        # Combine into a two-column layout with HTML
+        html_content = "<table><tr><td style='vertical-align:top; padding-right:20px'>"
+        html_content += "<br>".join(controls)
+        html_content += "</td><td style='vertical-align:top'>"
+        html_content += "<br>".join(category_instructions)
+        html_content += "</td></tr></table>"
+        
+        self.controls_label.setText(html_content)
     
     def prompt_custom_name(self):
         """Prompt the user for a custom name to replace the hash for the current file."""
@@ -422,6 +461,17 @@ class PhotoCategorizer(QMainWindow):
             self.update_controls_label()
             self.save_config()
     
+    def toggle_help(self):
+        """Toggle the visibility of the help text."""
+        self.help_visible = not self.help_visible
+        self.controls_scroll_area.setVisible(self.help_visible)
+        
+        # Update button text
+        if self.help_visible:
+            self.toggle_help_btn.setText("Hide Help")
+        else:
+            self.toggle_help_btn.setText("Show Help")
+    
     def keyPressEvent(self, event):
         key = event.text()
         
@@ -459,6 +509,8 @@ class PhotoCategorizer(QMainWindow):
     def rotate_image(self, degrees):
         """Rotate the displayed image by the specified degrees."""
         self.current_rotation = (self.current_rotation + degrees) % 360
+        # Clear the cached pixmap to force a reload with rotation
+        self.current_pixmap = None
         self.display_current_image()
     
     def display_current_image(self):
@@ -475,39 +527,53 @@ class PhotoCategorizer(QMainWindow):
             # Update custom name label whenever we display a new image
             self.update_custom_name_label()
             
-            try:
-                # Check if it's a RAW file
-                is_raw = img_path.suffix.lower() in ['.raw', '.cr2', '.nef', '.arw', '.dng', '.orf', '.rw2', '.pef', '.raf']
-                
-                if is_raw:
-                    # Extract EXIF data for RAW files
-                    with open(img_path, 'rb') as raw_file:
-                        tags = exifread.process_file(raw_file)
-                        # Extract preview image if available
-                        try:
-                            # For RAW files that PIL can't directly open, use the thumbnail from exifread
-                            img = Image.open(img_path)
-                            img.thumbnail((800, 600), Image.LANCZOS)
-                        except Exception:
-                            # If PIL fails, show a placeholder or message
-                            self.image_label.setText(f"RAW file detected: {img_path.name}\nPreview not available")
-                            return
-                else:
-                    # Regular image handling
-                    img = Image.open(img_path)
-                    img.thumbnail((800, 600), Image.LANCZOS)
-                
-                # Apply rotation if needed
-                if self.current_rotation != 0:
-                    img = img.rotate(-self.current_rotation, expand=True)
-                
-                # Convert PIL image to QPixmap for display
-                img_data = img.convert("RGB").tobytes("raw", "RGB")
-                qimg = QImage(img_data, img.width, img.height, img.width * 3, QImage.Format_RGB888)
-                self.image_label.setPixmap(QPixmap.fromImage(qimg))
-                self.adjustSize()
-            except Exception as e:
-                self.status_label.setText(f"Error loading image: {e}")
+            # Check if we need to load a new image or just resize the existing one
+            need_to_load = (self.current_pixmap is None) or (self.current_rotation != 0)
+            
+            if need_to_load:
+                try:
+                    # Check if it's a RAW file
+                    is_raw = img_path.suffix.lower() in ['.raw', '.cr2', '.nef', '.arw', '.dng', '.orf', '.rw2', '.pef', '.raf']
+                    
+                    if is_raw:
+                        # Extract EXIF data for RAW files
+                        with open(img_path, 'rb') as raw_file:
+                            tags = exifread.process_file(raw_file)
+                            # Extract preview image if available
+                            try:
+                                # For RAW files that PIL can't directly open, use the thumbnail from exifread
+                                img = Image.open(img_path)
+                            except Exception:
+                                # If PIL fails, show a placeholder or message
+                                self.image_label.setText(f"RAW file detected: {img_path.name}\nPreview not available")
+                                return
+                    else:
+                        # Regular image handling
+                        img = Image.open(img_path)
+                    
+                    # Apply rotation if needed
+                    if self.current_rotation != 0:
+                        img = img.rotate(-self.current_rotation, expand=True)
+                    
+                    # Convert PIL image to QPixmap for display
+                    img_data = img.convert("RGB").tobytes("raw", "RGB")
+                    qimg = QImage(img_data, img.width, img.height, img.width * 3, QImage.Format_RGB888)
+                    self.current_pixmap = QPixmap.fromImage(qimg)
+                    
+                except Exception as e:
+                    self.status_label.setText(f"Error loading image: {e}")
+                    return
+            
+            # Get the size of the image frame
+            frame_size = self.image_frame.size()
+            # Scale the pixmap to fit the frame while maintaining aspect ratio
+            scaled_pixmap = self.current_pixmap.scaled(
+                frame_size, 
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            )
+            
+            self.image_label.setPixmap(scaled_pixmap)
         else:
             self.status_label.setText("No more images to display")
     
@@ -711,6 +777,9 @@ class PhotoCategorizer(QMainWindow):
             # Reset rotation for next image
             self.current_rotation = 0
             
+            # Clear the cached pixmap for the next image
+            self.current_pixmap = None
+            
             # Handle end of processing or continue to next image
             if not self.image_files:
                 QMessageBox.information(self, "Complete", "All images have been processed!")
@@ -722,6 +791,13 @@ class PhotoCategorizer(QMainWindow):
             self.display_current_image()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to categorize image: {e}")
+
+    def resizeEvent(self, event):
+        """Handle window resize events - update the image display to fill the new size."""
+        super().resizeEvent(event)
+        # Redisplay the current image to ensure it scales properly
+        if hasattr(self, 'image_label') and self.image_label.pixmap() is not None:
+            self.display_current_image()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
