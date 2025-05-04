@@ -1,10 +1,10 @@
 {
     "keybinds": {
-        "next": "N",
-        "previous": "P",
-        "quit": "Q",
-        "rotate_clockwise": "R",
-        "rotate_counterclockwise": "E",
+        "next": "n",
+        "previous": "p",
+        "quit": "q",
+        "rotate_clockwise": "r",
+        "rotate_counterclockwise": "e",
         "custom_name": "Return"
     },
     "categories": {

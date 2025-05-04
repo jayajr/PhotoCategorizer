@@ -33,7 +33,7 @@ echo "Starting Photo Categorizer with modern PyQt5 UI..."
 echo "Place your photos in the 'in' directory."
 
 # Run the categorizer
-python3 photo_categorizer.py
+python3 main.py
 
 # Deactivate the virtual environment
 deactivate

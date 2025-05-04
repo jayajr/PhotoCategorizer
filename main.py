@@ -18,6 +18,7 @@ import io
 import datetime
 import hashlib
 import re
+from ui import CategoryDialog, KeybindDialog, PhotoCategorizerUI
 
 # Try to import piexif for better EXIF handling
 try:
@@ -40,101 +41,6 @@ DEFAULT_KEYBINDS = {
 DEFAULT_CATEGORIES = {
     "deleted": "Delete"  # Special category
 }
-
-class CategoryDialog(QDialog):
-    def __init__(self, categories, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Edit Categories")
-        self.setMinimumSize(400, 300)
-        
-        layout = QVBoxLayout(self)
-        
-        # Create table for categories
-        self.table = QTableWidget()
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["Category", "Key"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        
-        # Fill table with categories (excluding "deleted")
-        for category, key in [(c, k) for c, k in categories.items() if c != "deleted"]:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(category))
-            self.table.setItem(row, 1, QTableWidgetItem(key))
-        
-        layout.addWidget(self.table)
-        
-        # Add buttons for adding/removing categories
-        button_layout = QHBoxLayout()
-        add_button = QPushButton("Add Category")
-        add_button.clicked.connect(self.add_category)
-        button_layout.addWidget(add_button)
-        
-        remove_button = QPushButton("Remove Selected")
-        remove_button.clicked.connect(self.remove_category)
-        button_layout.addWidget(remove_button)
-        
-        layout.addLayout(button_layout)
-        
-        # Add a note about nested categories
-        note_label = QLabel("Note: For nested categories, use '/' as separator (e.g., 'animals/birds')")
-        layout.addWidget(note_label)
-        
-        # Dialog buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-    
-    def add_category(self):
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        self.table.setItem(row, 0, QTableWidgetItem("New Category"))
-        self.table.setItem(row, 1, QTableWidgetItem("C"))
-    
-    def remove_category(self):
-        for row in sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True):
-            self.table.removeRow(row)
-    
-    def get_categories(self):
-        categories = {"deleted": "Delete"}  # Always include the special deleted category
-        for row in range(self.table.rowCount()):
-            category_name = self.table.item(row, 0).text().strip()
-            key = self.table.item(row, 1).text().strip()
-            if category_name and key:
-                categories[category_name] = key
-        return categories
-
-class KeybindDialog(QDialog):
-    def __init__(self, keybinds, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Edit Keybinds")
-        self.setMinimumSize(400, 200)
-        
-        layout = QVBoxLayout(self)
-        grid = QGridLayout()
-        
-        # Add labels and inputs for each keybind
-        self.inputs = {}
-        for row, (action, key) in enumerate(keybinds.items()):
-            grid.addWidget(QLabel(f"{action}:"), row, 0)
-            self.inputs[action] = QLineEdit(key)
-            grid.addWidget(self.inputs[action], row, 1)
-        
-        # Add a note about the Delete key
-        note_label = QLabel("Note: The Delete key is hardcoded for the 'deleted' category")
-        grid.addWidget(note_label, row + 1, 0, 1, 2)
-        
-        layout.addLayout(grid)
-        
-        # Dialog buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-    
-    def get_keybinds(self):
-        return {action: input_field.text().strip() for action, input_field in self.inputs.items()}
 
 class PhotoCategorizer(QMainWindow):
     def __init__(self):
@@ -162,6 +68,9 @@ class PhotoCategorizer(QMainWindow):
         
         # Cache for current image pixmap
         self.current_pixmap = None
+        
+        # UI component
+        self.ui = PhotoCategorizerUI()
         
         # Load config if it exists
         self.load_config()
@@ -195,22 +104,22 @@ class PhotoCategorizer(QMainWindow):
     
     def load_config(self):
         """Load configuration from JSON file if it exists."""
-        if self.config_file.exists():
-            try:
-                with open(self.config_file, 'r') as f:
-                    saved_config = json.load(f)
-                    
-                # Update keybinds
-                if 'keybinds' in saved_config:
-                    self.keybinds.update(saved_config['keybinds'])
+        if not self.config_file.exists():
+            return
+            
+        try:
+            with open(self.config_file, 'r') as f:
+                saved_config = json.load(f)
                 
-                # Update categories (preserving "deleted")
-                if 'categories' in saved_config:
-                    for category, key in saved_config['categories'].items():
-                        if category != "deleted":
-                            self.categories[category] = key
-            except Exception as e:
-                print(f"Error loading config: {e}")
+            # Update keybinds
+            if 'keybinds' in saved_config:
+                self.keybinds.update(saved_config['keybinds'])
+            
+            # Update categories (preserving "deleted")
+            if 'categories' in saved_config:
+                self.categories.update({category: key for category, key in saved_config['categories'].items() if category != "deleted"})
+        except Exception as e:
+            print(f"Error loading config: {e}")
     
     def save_config(self):
         """Save current configuration to JSON file."""
@@ -238,29 +147,25 @@ class PhotoCategorizer(QMainWindow):
     
     def initialize_sequence_counter(self):
         """Initialize the sequence counter based on existing files in the output directory."""
-        max_sequence = 0
-        
         # Pattern to match sequence numbers in filenames (8 digits)
         sequence_pattern = re.compile(r'-(\d{8})-')
         
-        # Walk through all directories in out folder
-        for root, dirs, files in os.walk(self.out_dir):
-            for file in files:
-                # Skip files in the originals directory
-                if Path(root) == self.originals_dir:
-                    continue
+        # Find all sequence numbers across all dirs except originals
+        sequence_numbers = []
+        for root, _, files in os.walk(self.out_dir):
+            if Path(root) == self.originals_dir:
+                continue
                 
-                # Look for sequence numbers in filenames
+            for file in files:
                 match = sequence_pattern.search(file)
                 if match:
                     try:
-                        seq_num = int(match.group(1))
-                        max_sequence = max(max_sequence, seq_num)
+                        sequence_numbers.append(int(match.group(1)))
                     except ValueError:
                         pass
         
-        # Set the counter to one more than the highest found
-        self.sequence_counter = max_sequence + 1
+        # Set counter to max + 1 or 1 if no sequence found
+        self.sequence_counter = max(sequence_numbers, default=0) + 1
         print(f"Initialized sequence counter to {self.sequence_counter}")
     
     def get_image_files(self):
@@ -293,134 +198,24 @@ class PhotoCategorizer(QMainWindow):
                 print(f"Error validating image file {f}: {e}")
         
         # Sort image files in ascending order by name
-        image_files.sort()
-        
-        return image_files
+        return sorted(image_files)
     
     def setup_ui(self):
-        self.setWindowTitle("Photo Categorizer")
-        self.setMinimumSize(900, 700)
-        
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
-        
-        # Config buttons
-        config_layout = QHBoxLayout()
-        edit_categories_btn = QPushButton("Edit Categories")
-        edit_categories_btn.clicked.connect(self.edit_categories)
-        config_layout.addWidget(edit_categories_btn)
-        
-        edit_keybinds_btn = QPushButton("Edit Keybinds")
-        edit_keybinds_btn.clicked.connect(self.edit_keybinds)
-        config_layout.addWidget(edit_keybinds_btn)
-        
-        # Add custom name button
-        custom_name_btn = QPushButton("Custom Name")
-        custom_name_btn.clicked.connect(self.prompt_custom_name)
-        config_layout.addWidget(custom_name_btn)
-        
-        # Add toggle help button
-        self.toggle_help_btn = QPushButton("Hide Help")
-        self.toggle_help_btn.clicked.connect(self.toggle_help)
-        config_layout.addWidget(self.toggle_help_btn)
-        
-        main_layout.addLayout(config_layout)
-        
-        # Controls label with automatically adjusted height
-        self.controls_label = QLabel()
-        self.update_controls_label()
-        self.controls_label.setAlignment(Qt.AlignLeft)
-        self.controls_label.setTextFormat(Qt.RichText)
-        self.controls_label.setMargin(5)  # Add some padding
-        self.controls_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        main_layout.addWidget(self.controls_label)
-        # Store reference to controls label for toggling visibility
-        self.controls_scroll_area = self.controls_label  # Keep variable name for compatibility
-        
-        # Image display
-        self.image_frame = QFrame()
-        self.image_frame.setFrameShape(QFrame.StyledPanel)
-        self.image_frame.setLineWidth(1)
-        image_layout = QVBoxLayout(self.image_frame)
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.image_label.setScaledContents(False)  # We'll handle scaling manually
-        image_layout.addWidget(self.image_label)
-        main_layout.addWidget(self.image_frame, 1)  # Give the image frame a stretch factor of 1
-        
-        # Status footer (minimize size)
-        footer_layout = QHBoxLayout()
-        footer_layout.setContentsMargins(0, 0, 0, 0)
-        footer_layout.setSpacing(5)
-        
-        # Status label
-        self.status_label = QLabel()
-        self.status_label.setAlignment(Qt.AlignLeft)
-        # Set maximum height for the footer
-        self.status_label.setMaximumHeight(20)
-        footer_layout.addWidget(self.status_label)
-        
-        # Custom name status
-        self.custom_name_label = QLabel()
-        self.custom_name_label.setAlignment(Qt.AlignRight)
-        self.custom_name_label.setMaximumHeight(20)
-        footer_layout.addWidget(self.custom_name_label)
+        # Use the extracted UI component to setup
+        self.ui.setup_ui(self, self.keybinds, self.categories)
         self.update_custom_name_label()
-        
-        main_layout.addLayout(footer_layout)
-        
-        self.setCentralWidget(main_widget)
-        self.setFocusPolicy(Qt.StrongFocus)
-        
         # Display first image
         self.display_current_image()
         self.show()
     
     def update_custom_name_label(self):
         """Update the custom name label to show the current custom name status."""
-        if not self.image_files or self.current_index >= len(self.image_files):
-            self.custom_name_label.setText("")
-            return
-            
-        current_file = str(self.image_files[self.current_index])
-        if current_file in self.custom_names:
-            self.custom_name_label.setText(f"Custom name: {self.custom_names[current_file]}")
-        else:
-            self.custom_name_label.setText(f"No custom name set (using sequence: {self.sequence_counter:08d})")
+        self.ui.update_custom_name_label(self, self.custom_names, self.sequence_counter, 
+                                          self.image_files, self.current_index)
     
     def update_controls_label(self):
-        """Update the controls label with current keybinds and categories in a two-column layout."""
-        # Controls for left column
-        controls = [
-            "Controls:",
-            f"{self.keybinds['next']} = next image",
-            f"{self.keybinds['previous']} = previous image",
-            f"{self.keybinds['quit']} = quit",
-            "Delete/Backspace = move to deleted folder",
-            f"{self.keybinds['rotate_clockwise']} = rotate image clockwise",
-            f"{self.keybinds['rotate_counterclockwise']} = rotate image anticlockwise",
-            f"{self.keybinds['custom_name']} = set custom name (replaces hash)"
-        ]
-        
-        # Categories for right column
-        category_instructions = ["Categories:"]
-        
-        # Add categories except "deleted"
-        for category, key in self.categories.items():
-            if category != "deleted":
-                # Make nested categories more readable (e.g., "animals/birds" -> "animals > birds")
-                display_category = category.replace('/', ' > ')
-                category_instructions.append(f"{key} = move to {display_category} folder")
-        
-        # Combine into a two-column layout with HTML
-        html_content = "<table><tr><td style='vertical-align:top; padding-right:20px'>"
-        html_content += "<br>".join(controls)
-        html_content += "</td><td style='vertical-align:top'>"
-        html_content += "<br>".join(category_instructions)
-        html_content += "</td></tr></table>"
-        
-        self.controls_label.setText(html_content)
+        """Update the controls label with current keybinds and categories."""
+        self.ui.update_controls_label(self, self.keybinds, self.categories)
     
     def prompt_custom_name(self):
         """Prompt the user for a custom name to replace the hash for the current file."""
@@ -464,45 +259,43 @@ class PhotoCategorizer(QMainWindow):
     def toggle_help(self):
         """Toggle the visibility of the help text."""
         self.help_visible = not self.help_visible
-        self.controls_scroll_area.setVisible(self.help_visible)
+        self.controls_label.setVisible(self.help_visible)
         
         # Update button text
-        if self.help_visible:
-            self.toggle_help_btn.setText("Hide Help")
-        else:
-            self.toggle_help_btn.setText("Show Help")
+        self.toggle_help_btn.setText("Hide Help" if self.help_visible else "Show Help")
     
     def keyPressEvent(self, event):
         key = event.text()
         
         # Handle navigation keybinds
-        if key.lower() == self.keybinds['quit'].lower():
+        if key == self.keybinds['quit']:
             self.close()
-        elif key.lower() == self.keybinds['next'].lower() and self.current_index < len(self.image_files) - 1:
+        elif key == self.keybinds['next'] and self.current_index < len(self.image_files) - 1:
             self.current_index += 1
             self.current_rotation = 0  # Reset rotation for new image
+            self.current_pixmap = None  # Clear pixmap to force reload
             self.display_current_image()
-        elif key.lower() == self.keybinds['previous'].lower() and self.current_index > 0:
+        elif key == self.keybinds['previous'] and self.current_index > 0:
             self.current_index -= 1
             self.current_rotation = 0  # Reset rotation for new image
+            self.current_pixmap = None  # Clear pixmap to force reload
             self.display_current_image()
         # Handle Delete key for "deleted" category
-        elif event.key() == Qt.Key_Delete or event.key() == Qt.Key_Backspace:
+        elif event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             self.categorize_image("deleted")
         # Handle clockwise rotation
-        elif key.lower() == self.keybinds['rotate_clockwise'].lower():
+        elif key == self.keybinds['rotate_clockwise']:
             self.rotate_image(90)
         # Handle counterclockwise rotation
-        elif key.lower() == self.keybinds['rotate_counterclockwise'].lower():
+        elif key == self.keybinds['rotate_counterclockwise']:
             self.rotate_image(-90)
         # Handle custom name prompt (Enter key by default)
-        elif (event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter) or \
-             (key.lower() == self.keybinds['custom_name'].lower()):
+        elif event.key() in (Qt.Key_Return, Qt.Key_Enter) or key == self.keybinds['custom_name']:
             self.prompt_custom_name()
         # Handle category keybinds
         else:
             for category, bind in self.categories.items():
-                if key.lower() == bind.lower():
+                if key == bind:
                     self.categorize_image(category)
                     break
     
@@ -520,62 +313,61 @@ class PhotoCategorizer(QMainWindow):
             self.close()
             return
             
-        if 0 <= self.current_index < len(self.image_files):
-            img_path = self.image_files[self.current_index]
-            self.status_label.setText(f"Image {self.current_index + 1} of {len(self.image_files)}: {img_path.name}")
-            
-            # Update custom name label whenever we display a new image
-            self.update_custom_name_label()
-            
-            # Check if we need to load a new image or just resize the existing one
-            need_to_load = (self.current_pixmap is None) or (self.current_rotation != 0)
-            
-            if need_to_load:
-                try:
-                    # Check if it's a RAW file
-                    is_raw = img_path.suffix.lower() in ['.raw', '.cr2', '.nef', '.arw', '.dng', '.orf', '.rw2', '.pef', '.raf']
-                    
-                    if is_raw:
-                        # Extract EXIF data for RAW files
-                        with open(img_path, 'rb') as raw_file:
-                            tags = exifread.process_file(raw_file)
-                            # Extract preview image if available
-                            try:
-                                # For RAW files that PIL can't directly open, use the thumbnail from exifread
-                                img = Image.open(img_path)
-                            except Exception:
-                                # If PIL fails, show a placeholder or message
-                                self.image_label.setText(f"RAW file detected: {img_path.name}\nPreview not available")
-                                return
-                    else:
-                        # Regular image handling
-                        img = Image.open(img_path)
-                    
-                    # Apply rotation if needed
-                    if self.current_rotation != 0:
-                        img = img.rotate(-self.current_rotation, expand=True)
-                    
-                    # Convert PIL image to QPixmap for display
-                    img_data = img.convert("RGB").tobytes("raw", "RGB")
-                    qimg = QImage(img_data, img.width, img.height, img.width * 3, QImage.Format_RGB888)
-                    self.current_pixmap = QPixmap.fromImage(qimg)
-                    
-                except Exception as e:
-                    self.status_label.setText(f"Error loading image: {e}")
-                    return
-            
-            # Get the size of the image frame
-            frame_size = self.image_frame.size()
-            # Scale the pixmap to fit the frame while maintaining aspect ratio
-            scaled_pixmap = self.current_pixmap.scaled(
-                frame_size, 
-                Qt.KeepAspectRatio, 
-                Qt.SmoothTransformation
-            )
-            
-            self.image_label.setPixmap(scaled_pixmap)
-        else:
+        if not (0 <= self.current_index < len(self.image_files)):
             self.status_label.setText("No more images to display")
+            return
+            
+        img_path = self.image_files[self.current_index]
+        self.status_label.setText(f"Image {self.current_index + 1} of {len(self.image_files)}: {img_path.name}")
+        
+        # Update custom name label whenever we display a new image
+        self.update_custom_name_label()
+        
+        # Always force reload of image when navigating
+        self.current_pixmap = None
+        
+        try:
+            # Check if it's a RAW file
+            is_raw = img_path.suffix.lower() in ['.raw', '.cr2', '.nef', '.arw', '.dng', '.orf', '.rw2', '.pef', '.raf']
+            
+            if is_raw:
+                # Extract EXIF data for RAW files
+                with open(img_path, 'rb') as raw_file:
+                    exifread.process_file(raw_file)
+                    try:
+                        # For RAW files that PIL can't directly open, use the thumbnail from exifread
+                        img = Image.open(img_path)
+                    except Exception:
+                        # If PIL fails, show a placeholder or message
+                        self.image_label.setText(f"RAW file detected: {img_path.name}\nPreview not available")
+                        return
+            else:
+                # Regular image handling
+                img = Image.open(img_path)
+            
+            # Apply rotation if needed
+            if self.current_rotation != 0:
+                img = img.rotate(-self.current_rotation, expand=True)
+            
+            # Convert PIL image to QPixmap for display
+            img_data = img.convert("RGB").tobytes("raw", "RGB")
+            qimg = QImage(img_data, img.width, img.height, img.width * 3, QImage.Format_RGB888)
+            self.current_pixmap = QPixmap.fromImage(qimg)
+            
+        except Exception as e:
+            self.status_label.setText(f"Error loading image: {e}")
+            return
+        
+        # Get the size of the image frame
+        frame_size = self.image_frame.size()
+        # Scale the pixmap to fit the frame while maintaining aspect ratio
+        scaled_pixmap = self.current_pixmap.scaled(
+            frame_size, 
+            Qt.KeepAspectRatio, 
+            Qt.SmoothTransformation
+        )
+        
+        self.image_label.setPixmap(scaled_pixmap)
     
     def categorize_image(self, category):
         """Move the current image to the specified category folder, 
@@ -610,11 +402,10 @@ class PhotoCategorizer(QMainWindow):
                 # Try to get EXIF data
                 if hasattr(img, '_getexif') and img._getexif():
                     exif_data = img._getexif()
-                    # Look for orientation
+                    # Look for orientation and date
                     for tag, tag_name in ExifTags.TAGS.items():
                         if tag_name == 'Orientation' and tag in exif_data:
                             orientation = exif_data[tag]
-                        # Look for date
                         if tag_name == 'DateTimeOriginal' and tag in exif_data:
                             date_str = exif_data[tag]
                             try:
@@ -649,17 +440,11 @@ class PhotoCategorizer(QMainWindow):
                     custom_name = self.custom_names[current_file]
                     
                     # Track usage count for this name
-                    if custom_name in self.name_counts:
-                        self.name_counts[custom_name] += 1
-                    else:
-                        self.name_counts[custom_name] = 1
+                    self.name_counts[custom_name] = self.name_counts.get(custom_name, 0) + 1
                     
                     # Format name according to count
                     count = self.name_counts[custom_name]
-                    if count == 1:
-                        name_part = custom_name
-                    else:
-                        name_part = f"{custom_name}-{count}"
+                    name_part = custom_name if count == 1 else f"{custom_name}-{count}"
                 else:
                     # Use sequence number instead of hash
                     name_part = f"{self.sequence_counter:08d}"
@@ -686,11 +471,8 @@ class PhotoCategorizer(QMainWindow):
                         # Create minimal EXIF data with just orientation
                         exif_dict = {"0th": {}, "Exif": {}, "1st": {}, "GPS": {}}
                         # Find the orientation tag number
-                        orientation_tag = None
-                        for tag, tag_name in ExifTags.TAGS.items():
-                            if tag_name == 'Orientation':
-                                orientation_tag = tag
-                                break
+                        orientation_tag = next((tag for tag, tag_name in ExifTags.TAGS.items() 
+                                                if tag_name == 'Orientation'), None)
                         
                         if orientation_tag:
                             exif_dict["0th"][orientation_tag] = orientation

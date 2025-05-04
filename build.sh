@@ -23,7 +23,7 @@ source venv/bin/activate
 
 # Install dependencies including PyInstaller
 echo "Installing requirements (including PyInstaller)..."
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Create directories for output if they don't exist
 mkdir -p dist
@@ -39,7 +39,7 @@ echo "Building executable with PyInstaller..."
 pyinstaller --onefile --windowed \
     --name="PhotoCategorizer" \
     --add-data="config.json:." \
-    photo_categorizer.py
+    main.py
 
 echo "Build complete! Executable is in the 'dist' directory."
 
